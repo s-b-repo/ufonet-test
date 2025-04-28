@@ -58,14 +58,14 @@ class AI(Thread):
             with gzip.open(path, 'rb') as f_in:
                 content = f_in.readlines()
 
-                for key, (output_name, incoming_list) in categories.items():
-                    if key in meat:
-                        output_path = os.path.join(self.tmp_dir, output_name)
-                        with open(output_path, 'wb') as f_out:
-                            for line in content:
-                                incoming_list.append(line)
-                                f_out.write(line.strip() + os.linesep)
-                        break
+            for key, (output_name, incoming_list) in categories.items():
+                if key in meat:
+                    output_path = os.path.join(self.tmp_dir, output_name)
+                    with open(output_path, 'wb') as f_out:
+                        for line in content:
+                            incoming_list.append(line)
+                            f_out.write(line.strip() + os.linesep)
+                    break
             os.remove(path)
 
         # Test zombies
@@ -87,7 +87,7 @@ class AI(Thread):
                 print("[Info] [AI] No valid zombies!")
                 return
 
-        # Process results
+        # Process and merge into army containers
         self.update_army('abductions.txt.gz', 'meat.txt', "Zombies")
         self.update_army('troops.txt.gz', 'larva.txt', "Aliens")
         self.update_army('robots.txt.gz', 'chip.txt', "Droids")
@@ -135,6 +135,7 @@ class AI(Thread):
             time.sleep(5)
         print("[Info] [AI] Power Off")
 
+
 class BlackRay(Thread):
     def __init__(self, parent):
         super().__init__()
@@ -145,6 +146,7 @@ class BlackRay(Thread):
 
     def run(self):
         self.sock = self.parent.try_bind(9991)
+
         if self.sock:
             self.sock.listen(1)
             print('[Info] [AI] [BlackRay] Emitting on port 9991')
@@ -157,78 +159,90 @@ class BlackRay(Thread):
             try:
                 conn, addr = self.sock.accept()
                 print(f'[Info] [AI] [BlackRay] Got connection from {addr}')
-                data = conn.recv(1024)
-                if data and data[:4] == b"SEND":
-                    print(f"[Info] [AI] [BlackRay] Meat ready: {data[5:].decode(errors='ignore')}")
-                conn.close()
             except socket.timeout:
                 continue
             except socket.error as e:
                 if not self.shining:
-                    print(f"[Error] [AI] [BlackRay] Socket Error /return: {e}")
+                    print(f"[Error] [AI] [BlackRay] Socket Error /return : {e}")
                     return
                 else:
-                    print(f"[Error] [AI] [BlackRay] Socket Error /break: {e}")
+                    print(f"[Error] [AI] [BlackRay] Socket Error /break : {e}")
                     break
+            else:
+                try:
+                    data = conn.recv(1024)
+                    if data and data[:4] == b"SEND":
+                        print(f"[Info] [AI] [BlackRay] Meat ready : {data[5:].decode(errors='ignore')}")
+                except Exception as e:
+                    print(f"[Error] [AI] [BlackRay] Error receiving data: {e}")
+                finally:
+                    conn.close()
 
         print('[Info] [AI] [BlackRay] End of emission')
         if self.sock:
             self.sock.close()
+
+
 
 class Eater(Thread):
     def __init__(self, client, parent):
         super().__init__()
         self.client = client
         self.parent = parent
-        self.meat_types = {
-            "community_zombies.txt.gz": "meat",
-            "community_aliens.txt.gz": "larva",
-            "community_droids.txt.gz": "chip",
-            "community_ucavs.txt.gz": "arduino",
-            "community_rpcs.txt.gz": "mirror",
-            "community_ntps.txt.gz": "clock",
-            "community_dnss.txt.gz": "label",
-            "community_snmps.txt.gz": "glass"
+
+        self.meats = {
+            "community_zombies.txt.gz": "zombies",
+            "community_aliens.txt.gz": "aliens",
+            "community_droids.txt.gz": "droids",
+            "community_ucavs.txt.gz": "ucavs",
+            "community_rpcs.txt.gz": "rpcs",
+            "community_ntps.txt.gz": "ntps",
+            "community_dnss.txt.gz": "dnss",
+            "community_snmps.txt.gz": "snmps"
         }
 
     def run(self):
         print('[Info] [AI] Yum... got meat')
         try:
-            data = self.client.recv(4096)
+            data = self.client.recv(4096).decode("utf-8")
         except Exception:
-            data = b""
+            data = ""
 
         if not data:
             self.client.close()
+            self.parent.eater_full(self)
             return
 
-        for meat_file, filename in self.meat_types.items():
-            if meat_file.encode() in data:
-                try:
-                    # Use regex to extract filename from payload
-                    match = re.search(rb".*(" + meat_file.encode() + rb").*", data)
-                    if match:
-                        m = match.group(1).decode(errors='ignore')
-                        path = os.path.join(self.parent.tmp_dir, "blackhole", m)
-                        with open(path, "wb") as f:
-                            f.write(data)
-                        print(f'\n[Info] [AI] Got "{path}" Closing media transfer')
-                except Exception:
-                    pass
-                break
+        for meat_file in self.meats:
+            if meat_file in data:
+                self._save_meat(meat_file, data)
+                break  # Once found and saved, stop checking others
 
         self.client.close()
         self.parent.eater_full(self)
+
+    def _save_meat(self, meat_name, data):
+        try:
+            r = re.compile(f".*({re.escape(meat_name)}).*")
+            meat_type = r.search(data)
+            if meat_type:
+                m = meat_type.group(1)
+                path = f"{self.parent.tmp_dir}blackhole/{m}"
+                with open(path, "wb") as f:
+                    f.write(data.encode('utf-8'))
+                print(f'\n[Info] [AI] Got "{path}" Closing media transfer')
+        except Exception as e:
+            print(f"[Error] [AI] Failed to save meat '{meat_name}': {e}")
 
 
 class Absorber(Thread):
     def __init__(self, parent):
         super().__init__()
         self.parent = parent
-        self.overflow = True
-        self._eaters = []
         self.tmp_dir = parent.tmp_dir
+        self.overflow = True
         self.sock = None
+        self._eaters = []
 
     def run(self):
         self.sock = self.parent.try_bind(9990)
@@ -238,34 +252,33 @@ class Absorber(Thread):
             self.overflow = False
         else:
             print('[Error] [AI] Failed to listen on port 9990')
-            return
 
         while not self.overflow:
             try:
                 conn, addr = self.sock.accept()
-                print(f'[Info] [AI] Got connection from {addr}')
-                eater_thread = Eater(conn, self)
-                eater_thread.start()
-                self._eaters.append(eater_thread)
+                print('[Info] [AI] Got connection from', addr)
             except socket.timeout:
-                continue
+                pass
             except socket.error as e:
-                if self.overflow:
-                    print(f"[Error] [AI] Socket Error /return: {e}")
+                if not self.hungry:
+                    print(f"[Error] [AI] Socket Error /return : {e}")
                     return
                 else:
-                    print(f"[Error] [AI] Socket Error /break: {e}")
+                    print(f"[Error] [AI] Socket Error /break : {e}")
                     break
+            else:
+                eater = Eater(conn, self)
+                eater.start()
+                self._eaters.append(eater)
 
         if self.sock:
             self.sock.close()
         print('[Info] [AI] Dinner time is over')
 
-    def eater_full(self, _thread):
-        try:
-            self._eaters.remove(_thread)
-        except ValueError:
-            pass
+    def eater_full(self, eater_thread):
+        if eater_thread in self._eaters:
+            self._eaters.remove(eater_thread)
+
 
 class BlackHole(Thread):
     def __init__(self):
@@ -278,41 +291,47 @@ class BlackHole(Thread):
         self.absorber = None
         self.computer = None
 
+    def _check_and_create_file(self, filename):
+        path = os.path.join(self.target_dir, filename)
+        fail = 0
+        if not os.path.exists(path):
+            try:
+                with gzip.open(path, 'wb') as fc:
+                    pass
+            except:
+                print(f"[Error] [AI] Not '{filename}' file in {self.target_dir}")
+                fail += 1
+        if not os.access(path, os.W_OK):
+            print(f"[Error] [AI] Write access denied for '{filename}' file in {self.target_dir}")
+            fail += 1
+        return fail
+
     def dream(self):
-        containers = {
-            'abductions.txt.gz': 'abductions',
-            'troops.txt.gz': 'troops',
-            'robots.txt.gz': 'robots',
-            'drones.txt.gz': 'drones',
-            'reflectors.txt.gz': 'reflectors',
-            'warps.txt.gz': 'warps',
-            'crystals.txt.gz': 'crystals',
-            'bosons.txt.gz': 'bosons'
-        }
+        print("[Info] [AI] Preparing Blackhole resources...")
+        files = [
+            "abductions.txt.gz",
+            "troops.txt.gz",
+            "robots.txt.gz",
+            "drones.txt.gz",
+            "reflectors.txt.gz",
+            "warps.txt.gz",
+            "crystals.txt.gz",
+            "bosons.txt.gz"
+        ]
 
-        failed = 0
+        total_failures = sum(self._check_and_create_file(f) for f in files)
 
-        for filename, label in containers.items():
-            path = os.path.join(self.target_dir, filename)
-            if not os.path.exists(path):
-                try:
-                    with gzip.open(path, 'wb') as f:
-                        pass
-                except Exception:
-                    print(f"[Error] [AI] No '{filename}' file in {self.target_dir}")
-                    failed += 1
-
-            if not os.access(path, os.W_OK):
-                print(f"[Error] [AI] Write access denied for '{label}' file in {self.target_dir}")
-                failed += 1
-
-        if failed == len(containers) * 2:
+        if total_failures == len(files):
             print("\n[Error] [AI] Cannot find any container... -> [Aborting!]")
             print("\n[Info] [AI] Suspend [Blackhole] with: Ctrl+z")
             sys.exit(2)
 
         if self.consume():
-            os.makedirs(os.path.join(self.tmp_dir, "blackhole"), exist_ok=True)
+            try:
+                os.mkdir(os.path.join(self.tmp_dir, "blackhole"))
+            except Exception as e:
+                print(f"[Error] [AI] [Blackhole] Unable to create directory: {e}")
+                sys.exit(2)
         else:
             print(f"[Error] [AI] [Blackhole] Unable to consume in {self.tmp_dir}blackhole...")
             sys.exit(2)
@@ -328,10 +347,10 @@ class BlackHole(Thread):
         print("[Info] [AI] [Blackhole] Having sweet dreams...")
 
     def consume(self):
-        path = os.path.join(self.tmp_dir, "blackhole")
-        if os.path.isdir(path):
+        blackhole_path = os.path.join(self.tmp_dir, "blackhole")
+        if os.path.isdir(blackhole_path):
             try:
-                shutil.rmtree(path)
+                shutil.rmtree(blackhole_path)
             except OSError as e:
                 print(f"[Error] [AI] [Blackhole] Unable to consume: {e}")
                 return False
@@ -344,7 +363,7 @@ class BlackHole(Thread):
             s.bind(('', port))
             return s
         except socket.error as e:
-            if e.errno == 98:
+            if e.errno == 98:  # Address already in use
                 time.sleep(3)
                 return self.try_bind(port)
             print(f"[Error] [AI] [Blackhole] Socket busy, connection failed on port {port}")
@@ -357,11 +376,9 @@ class BlackHole(Thread):
             self.absorber.start()
             self.computer.start()
 
-            if not self.blackray.shining or self.absorber.overflow or not self.computer.power_on:
-                print("[Info] [AI] Advancing time in another space (waiting for server)\n")
-                time.sleep(1)
+            print("[Info] [AI] Waiting for components to stabilize...")
 
-            while not self.blackray.shining or self.absorber.overflow or not self.computer.power_on:
+            while not (self.blackray.shining and not self.absorber.overflow and self.computer.power_on):
                 time.sleep(1)
 
             print("\n[Info] [AI] [BlackHole] All up and running...")
@@ -378,17 +395,13 @@ class BlackHole(Thread):
     def collapse(self):
         if self.blackray:
             self.blackray.shining = False
-        if self.absorber:
-            self.absorber.overflow = True
-        if self.computer:
-            self.computer.power_on = False
-
-        if self.computer:
-            self.computer.join()
-        if self.blackray:
             self.blackray.join()
         if self.absorber:
+            self.absorber.overflow = True
             self.absorber.join()
+        if self.computer:
+            self.computer.power_on = False
+            self.computer.join()
 
     def awaken(self):
         self.consume()
@@ -398,15 +411,14 @@ class BlackHole(Thread):
 if __name__ == "__main__":
     try:
         print("\n[Info] [AI] Initiating void generation sequence...\n")
-        print('=' * 22 + '\n')
+        print('='*22 + '\n')
         app = BlackHole()
         app.start()
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n[Info] [AI] Terminating void generation sequence...\n")
-        if app:
-            app.collapse()
+        app.collapse()
     except Exception:
         traceback.print_exc()
         print("\n[Error] [AI] Something wrong creating [Blackhole] -> [Passing!]\n")
