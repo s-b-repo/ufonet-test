@@ -93,6 +93,26 @@ on a direct-connect P2P architecture.
        python3 -m pip install pycurl --upgrade --root-user-action=ignore
        python3 -m pip install GeoIP python-geoip pygeoip requests whois scapy pycryptodomex duckduckgo-search --ignore-installed --root-user-action=ignore
 
+How to use
+
+    Save the above as ufonet_daemon.py in the same folder as your ufonet binary.
+
+    Make it executable:
+
+chmod +x ufonet_daemon.py
+
+Start the daemon:
+
+./ufonet_daemon.py
+
+Check status:
+
+./ufonet_daemon.py status
+
+Stop the daemon:
+
+./ufonet_daemon.py stop
+
 ----------
 
 ####  License:
