@@ -100,15 +100,44 @@ def install_python_packages():
 
 
 def setup_web_folder():
-    print("\n[UFONET] Setting up web folder at /var/www/ufonet/...\n")
+    target_dir = "/var/www/ufonet/"
+    print(f"\n[UFONET] Setting up web folder at {target_dir}...\n")
+    
     try:
-        subprocess.run(["sudo", "mkdir", "-p", "/var/www/ufonet/"], check=True)
-        subprocess.run(["sudo", "chown", f"{os.getenv('USER')}:{os.getenv('USER')}", "/var/www/ufonet/"], check=True)
-        subprocess.run(["sudo", "chmod", "755", "/var/www/ufonet/"], check=True)
+        # Step 1: Create folder if it doesn't exist
+        if not os.path.exists(target_dir):
+            subprocess.run(["sudo", "mkdir", "-p", target_dir], check=True)
+            print(f"[UFONET] Created folder: {target_dir}")
+        else:
+            print(f"[UFONET] Folder already exists: {target_dir}")
+
+        # Step 2: Check ownership
+        stat_info = os.stat(target_dir)
+        uid = stat_info.st_uid
+        user_name = os.getenv('USER')
+        import pwd
+        current_owner = pwd.getpwuid(uid).pw_name
+
+        if current_owner != user_name:
+            subprocess.run(["sudo", "chown", f"{user_name}:{user_name}", target_dir], check=True)
+            print(f"[UFONET] Ownership corrected to {user_name}:{user_name}")
+        else:
+            print(f"[UFONET] Ownership already correct: {current_owner}")
+
+        # Step 3: Check permissions
+        permissions = oct(stat_info.st_mode)[-3:]
+        if permissions != "755":
+            subprocess.run(["sudo", "chmod", "755", target_dir], check=True)
+            print(f"[UFONET] Permissions corrected to 755")
+        else:
+            print(f"[UFONET] Permissions already 755")
+
         print("[UFONET] Web folder setup complete!")
-    except subprocess.CalledProcessError as e:
-        print(f"[ERROR] Failed to setup /var/www/ufonet/: {e}")
+
+    except Exception as e:
+        print(f"[ERROR] Failed to setup {target_dir}: {e}")
         sys.exit(1)
+
 
 
 def rerun_as_root():
