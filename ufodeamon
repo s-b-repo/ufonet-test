@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""
+ufonet_daemon.py
+
+Daemon wrapper for running './ufonet --download-nodes' in the background.
+"""
+
+import os
+import sys
+import time
+import signal
+import atexit
+import subprocess
+
+# ─── Configuration ──────────────────────────────────────────────────────────────
+
+# Path to the UFONet binary
+UFONET_PATH = os.path.abspath('./ufonet')
+# Arguments to pass
+UFONET_ARGS = ['--download-nodes']
+# Where to write the daemon PID
+PID_FILE = '/tmp/ufonet_download_nodes.pid'
+# Where to send stdout/stderr
+LOG_FILE = '/tmp/ufonet_download_nodes.log'
+# Seconds to wait before restarting if it crashes
+RESTART_DELAY = 60
+
+# ─── Daemonization Helpers ──────────────────────────────────────────────────────
+
+def daemonize():
+    # First fork
+    if os.fork() > 0:
+        sys.exit(0)
+    os.setsid()
+    # Second fork
+    if os.fork() > 0:
+        sys.exit(0)
+
+    # Redirect standard file descriptors
+    sys.stdout.flush()
+    sys.stderr.flush()
+    si = open(os.devnull, 'r')
+    so = open(LOG_FILE, 'a+')
+    se = open(LOG_FILE, 'a+')
+    os.dup2(si.fileno(), sys.stdin.fileno())
+    os.dup2(so.fileno(), sys.stdout.fileno())
+    os.dup2(se.fileno(), sys.stderr.fileno())
+
+    # Write PID file
+    with open(PID_FILE, 'w') as f:
+        f.write(str(os.getpid()))
+    atexit.register(lambda: os.remove(PID_FILE))
+
+def is_running():
+    if os.path.exists(PID_FILE):
+        with open(PID_FILE) as f:
+            try:
+                pid = int(f.read().strip())
+                os.kill(pid, 0)
+                return True
+            except Exception:
+                return False
+    return False
+
+# ─── Main Loop ─────────────────────────────────────────────────────────────────
+
+def run_loop():
+    cmd = [UFONET_PATH] + UFONET_ARGS
+    while True:
+        proc = subprocess.Popen(cmd)
+        proc.wait()
+        # If it exited, pause then restart
+        time.sleep(RESTART_DELAY)
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ('stop', 'status'):
+        if sys.argv[1] == 'status':
+            print("Running" if is_running() else "Not running")
+            sys.exit(0)
+        # stop
+        if is_running():
+            with open(PID_FILE) as f:
+                pid = int(f.read().strip())
+            os.kill(pid, signal.SIGTERM)
+            print("Stopped")
+        else:
+            print("Not running")
+        sys.exit(0)
+
+    if is_running():
+        print("Daemon already running")
+        sys.exit(1)
+
+    # Start daemon
+    daemonize()
+    run_loop()
+
+if __name__ == '__main__':
+    main()
