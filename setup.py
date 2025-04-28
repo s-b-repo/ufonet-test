@@ -99,6 +99,17 @@ def install_python_packages():
         )
 
 
+def setup_web_folder():
+    print("\n[UFONET] Setting up web folder at /var/www/ufonet/...\n")
+    try:
+        subprocess.run(["sudo", "mkdir", "-p", "/var/www/ufonet/"], check=True)
+        subprocess.run(["sudo", "chown", f"{os.getenv('USER')}:{os.getenv('USER')}", "/var/www/ufonet/"], check=True)
+        subprocess.run(["sudo", "chmod", "755", "/var/www/ufonet/"], check=True)
+        print("[UFONET] Web folder setup complete!")
+    except subprocess.CalledProcessError as e:
+        print(f"[ERROR] Failed to setup /var/www/ufonet/: {e}")
+        sys.exit(1)
+
 
 def rerun_as_root():
     try:
@@ -116,6 +127,7 @@ def main():
     speech()
     install_system_dependencies()
     install_python_packages()
+    setup_web_folder()
 
     print("\n[UFONET] Setup completed successfully! You can now run: ./ufonet\n")
 
